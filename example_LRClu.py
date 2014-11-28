@@ -5,6 +5,7 @@ import numpy
 import scipy
 import nibabel
 from nilearn import datasets
+import pickle
 
 def hardthresh(mat):
     """
@@ -36,54 +37,125 @@ def dice(im1, im2):
     The order of inputs for `dice` is irrelevant. The result will be
     identical if `im1` and `im2` are switched.
     """
-    im1 = np.asarray(im1).astype(np.bool)
-    im2 = np.asarray(im2).astype(np.bool)
+    im1 = numpy.asarray(im1).astype(numpy.bool)
+    im2 = numpy.asarray(im2).astype(numpy.bool)
      
     if im1.shape != im2.shape:
         raise ValueError("Shape mismatch: im1 and im2 must have the same shape.")
      
     # Compute Dice coefficient
-    intersection = np.logical_and(im1, im2)
+    intersection = numpy.logical_and(im1, im2)
      
     return 2. * intersection.sum() / (im1.sum() + im2.sum()) 
+    
 
+            
+            
+    
+    
 class LRClu():
     """performs low rank clustering
     """
     def __init__(self):
-        self.K=10
+        self.K=100
         self.maxit=5
-        self.X4d=nibabel.load(datasets.fetch_adhd().func[0]).get_data()
-        x,y,z,N = X4d.shape
-        M=x*y*z
-        self.X=X4d.reshape((M,N))
-        
+        X4d=nibabel.load(datasets.fetch_adhd().func[0]).get_data()
+        x,y,z,M = X4d.shape
+        N=x*y*z
+        self.brainsize=[x,y,z]
+        self.X=X4d.reshape((N,M)).transpose()
+        self.tv=0.1
+        self.eps=0.02
         #random initialisation
-        self.D=numpy.random.rand(M,K)
-        self.S=numpy.random.rand(K,N)
+        self.D=numpy.random.rand(M,self.K)
+        self.S=numpy.random.rand(self.K,N)
         self.S=hardthresh(self.S)
         self.S0=self.S
+        try:
+            self.nbh=pickle.load(open('neigh.pickle','rb'))
+            print "Neighbourhood table found"
+        except:                
+            self.getneighbours()
+    
+    def getneighbours(self):
+        
+        N=numpy.prod(self.brainsize)
+        E=[-1,0,1]
+        self.nbh=numpy.zeros((N,26))
+        for k in range(0,N):
+            if numpy.mod(k,10000)==0:
+                print 'Building neighbourhood table : ' + str(100*k/N) + '%'
+
+            xk,yk,zk=numpy.unravel_index(k,self.brainsize)
+            neigh_id=0
+            for ex in E:
+                for ey in E:
+                    for ez in E:
+                        if abs(ex)+abs(ey)+abs(ez):
+                            nesub=[max(min(xk+ex,self.brainsize[0]-1),0),max(min(yk+ey,self.brainsize[1]-1),0),max(min(zk+ez,self.brainsize[2]-1),0)]
+                            neigh=numpy.ravel_multi_index(nesub,self.brainsize)
+                            self.nbh[k,neigh_id]=neigh
+                            neigh_id=neigh_id+1
+        pickle.dump(Nbh,open('neigh.pickle','wb'))
+
+                 
+            
+
+            
+                
+        
+    def tv_grad(self,S1d):
+        """
+        compute gradient of smoothed tv
+        """
+        N=len(S1d)
+        Gr=numpy.zeros((N,26))
+        Y=numpy.zeros((N,1))
+        for n in range(0,N):
+            nbhs=self.nbh[n,:]
+            for k in range(0,len(nbhs)):
+                Gr[n,k]=S1d[n]-S1d[nbhs[k]]
+        d2=(Gr*Gr).sum(axis=1)
+    
+        for n in range(0,N):
+            nbhs=self.nbh[n,self.nbh[n,:].nonzero()][0]
+            
+            for k in range(0,len(nbhs)):
+
+                
+
+                Y[nbhs[k]]=Y[nbhs[k]]+S1d[nbhs[k]]/numpy.sqrt(self.eps**2+d2[n])
+                
+        G=-(26*X/numpy.sqrt(self.eps**2+d2)+Y).transpose()
+        return G
+        
     def factorize(self):
         
         for it in range(0,self.maxit):
-            
-            print it
-            print dice(self.S,self.S0)
+            if numpy.mod(it,10)==0:
+                print 'Factorization : ' + str(100*it/self.maxit) + '%'
+                print 'Distance to initialisation : ' + str(dice(self.S,self.S0))
             #evasive action : drop empty clusters
             nnz=abs(self.S.transpose()).sum(axis=0).nonzero()[0]
             iS=self.S[nnz,:]
             iD=self.D[:,nnz]
+            
             #update the centers
             self.D[:,nnz]=iD+numpy.dot(self.X-numpy.dot(iD,iS),iS.transpose())
             
-            #clear iS
+            #could clear iS
+            
             #normalize D
-            for k in range(0,K):
+            for k in range(0,self.K):
                 self.D[:,k]=self.D[:,k]/numpy.linalg.norm(self.D[:,k])
                 
             #update the assignments
             self.S=self.S+numpy.dot(self.D.transpose(),self.X-numpy.dot(self.D,self.S));
             self.S=hardthresh(self.S)
+            if self.tv:
+                for k in range(0,self.K):
+                    
+                    self.S[k,:]=self.S[k,:]-self.tv*self.tv_grad(self.S[k,:])
             
 DS=LRClu()
 DS.factorize()
