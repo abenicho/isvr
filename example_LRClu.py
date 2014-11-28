@@ -4,8 +4,9 @@ LRClu
 import numpy
 import scipy
 import nibabel
-from nilearn import datasets
+from nilearn import datasets, input_data
 import pickle
+
 
 def hardthresh(mat):
     """
@@ -18,6 +19,7 @@ def hardthresh(mat):
  
 
 def dice(im1, im2):
+    #written by Josh Warner
     """
     Computes the Dice coefficient, a measure of set similarity.
     Parameters
@@ -36,6 +38,8 @@ def dice(im1, im2):
     -----
     The order of inputs for `dice` is irrelevant. The result will be
     identical if `im1` and `im2` are switched.
+    
+    
     """
     im1 = numpy.asarray(im1).astype(numpy.bool)
     im2 = numpy.asarray(im2).astype(numpy.bool)
@@ -54,31 +58,37 @@ def dice(im1, im2):
     
     
 class LRClu():
-    """performs low rank clustering
+    """
+     low rank clustering
     """
     def __init__(self):
         self.K=100
-        self.maxit=50
+        self.maxit=100
+        self.dataset=datasets.fetch_adhd()
         X4d=nibabel.load(datasets.fetch_adhd().func[0]).get_data()
         x,y,z,M = X4d.shape
         N=x*y*z
         self.brainsize=[x,y,z]
         self.X=X4d.reshape((N,M)).transpose()
-        self.tv=0.1
+        self.tv=0
         self.eps=0.02
         #random initialisation
         self.D=numpy.random.rand(M,self.K)
         self.S=numpy.random.rand(self.K,N)
         self.S=hardthresh(self.S)
-        self.S0=self.S
-        try:
-            self.nbh=pickle.load(open('neigh.pickle','rb'))
-            print "Neighbourhood table found"
-        except:                
-            self.getneighbours()
+        self.S0=self.S #to be replaced by ground truth, if available
+        if self.tv:
+            try:
+                self.nbh=pickle.load(open('neigh' + str(N)+'.pickle','rb'))
+
+                print "Neighbourhood table found"
+            except:                
+                self.getneighbours()    
     
     def getneighbours(self):
-        
+        """
+        computes  neighbourhood table
+        """
         N=numpy.prod(self.brainsize)
         E=[-1,0,1]
         self.nbh=numpy.zeros((N,26))
@@ -96,7 +106,7 @@ class LRClu():
                             neigh=numpy.ravel_multi_index(nesub,self.brainsize)
                             self.nbh[k,neigh_id]=neigh
                             neigh_id=neigh_id+1
-        pickle.dump(Nbh,open('neigh.pickle','wb'))
+        pickle.dump(Nbh,open('neigh' + str(N)+'.pickle','wb'))
 
                  
             
@@ -131,11 +141,13 @@ class LRClu():
         return G
         
     def factorize(self):
-        
+        """
+        performs low rank clustering
+        """
         for it in range(0,self.maxit):
             if numpy.mod(it,self.maxit/10)==0:
                 print 'Factorization : ' + str(100*it/self.maxit) + '%'
-                print 'Distance to initialisation : ' + str(dice(self.S,self.S0))
+                print 'Similarity to initialisation : ' + str(dice(self.S,self.S0))
             #evasive action : drop empty clusters
             nnz=abs(self.S.transpose()).sum(axis=0).nonzero()[0]
             iS=self.S[nnz,:]
@@ -157,13 +169,32 @@ class LRClu():
                 for k in range(0,self.K):
 
                     self.S[k,:]=self.S[k,:]-self.tv*self.tv_grad(self.S[k,:])
-            
+    def getbrainmap(self):
+        K,N=self.S.shape
+        self.brainmap=numpy.zeros(self.brainsize)
+        for n in range(0,N):
+            x,y,z=numpy.unravel_index(n,self.brainsize)
+            self.brainmap[x,y,z]=sum(self.S[:,n].nonzero()[0]) 
+
+
+
+
+ ### Display clustering       
+  
+from nilearn.image import mean_img
+from nilearn.plotting.img_plotting import plot_roi, plot_epi
+          
+        
 DS=LRClu()
 DS.factorize()
+DS.getbrainmap()
 
+for k in range(1,10):
+    x0= k*DS.brainsize[0]/10
+    slice=DS.brainmap[x0,:,:]
+    plt.imshow(slice)
+    fig = plt.figure()
 
-
-    
     
 
 
