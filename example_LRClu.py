@@ -58,7 +58,7 @@ class LRClu():
     """
     def __init__(self):
         self.K=100
-        self.maxit=5
+        self.maxit=50
         X4d=nibabel.load(datasets.fetch_adhd().func[0]).get_data()
         x,y,z,M = X4d.shape
         N=x*y*z
@@ -83,7 +83,7 @@ class LRClu():
         E=[-1,0,1]
         self.nbh=numpy.zeros((N,26))
         for k in range(0,N):
-            if numpy.mod(k,10000)==0:
+            if numpy.mod(k,int(N/10))==0:
                 print 'Building neighbourhood table : ' + str(100*k/N) + '%'
 
             xk,yk,zk=numpy.unravel_index(k,self.brainsize)
@@ -118,6 +118,7 @@ class LRClu():
         d2=(Gr*Gr).sum(axis=1)
     
         for n in range(0,N):
+
             nbhs=self.nbh[n,self.nbh[n,:].nonzero()][0]
             
             for k in range(0,len(nbhs)):
@@ -126,13 +127,13 @@ class LRClu():
 
                 Y[nbhs[k]]=Y[nbhs[k]]+S1d[nbhs[k]]/numpy.sqrt(self.eps**2+d2[n])
                 
-        G=-(26*X/numpy.sqrt(self.eps**2+d2)+Y).transpose()
+        G=-(26*S1d/numpy.sqrt(self.eps**2+d2)+Y).transpose()
         return G
         
     def factorize(self):
         
         for it in range(0,self.maxit):
-            if numpy.mod(it,10)==0:
+            if numpy.mod(it,self.maxit/10)==0:
                 print 'Factorization : ' + str(100*it/self.maxit) + '%'
                 print 'Distance to initialisation : ' + str(dice(self.S,self.S0))
             #evasive action : drop empty clusters
@@ -154,7 +155,7 @@ class LRClu():
             self.S=hardthresh(self.S)
             if self.tv:
                 for k in range(0,self.K):
-                    
+
                     self.S[k,:]=self.S[k,:]-self.tv*self.tv_grad(self.S[k,:])
             
 DS=LRClu()
